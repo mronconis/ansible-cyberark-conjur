@@ -1,0 +1,3 @@
+# Python deps for the Ansible control node (install inside a virtualenv).
+ansible-core>=2.16,<2.19
+jmespath>=1.0.1

@@ -1,0 +1,157 @@
+---
+# Configure Automation Controller (AWX/AAP) for Conjur-backed SSH Machine credentials.
+# Requires ansible collections: awx.awx
+#
+# Expected environment (see controller/.controller.env):
+#   CONTROLLER_HOST, CONTROLLER_USERNAME, CONTROLLER_PASSWORD, CONTROLLER_VERIFY_SSL
+#   CONJUR_URL, TARGET_HOST
+# Plus files from conjur bootstrap:
+#   conjur/host_api_key, conjur/conjur-server.pem
+# TARGET_PORT / TARGET_HOST / CONJUR_URL may be set by configure.sh (from vagrant ssh-config).
+
+- name: Configure Controller for CyberArk Conjur demo
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    project_name: cyberark-conjur-demo
+    inventory_name: conjur-demo-inventory
+    machine_cred_name: conjur-demo-machine
+    conjur_cred_name: conjur-secrets-lookup
+    job_template_name: conjur-demo-ping
+    organization_name: Default
+    conjur_account: demo
+    conjur_username: host/ansible/control-node
+    conjur_secret_ssh_key: ansible/target/ssh_private_key
+    repo_root: "{{ playbook_dir }}/../.."
+    conjur_api_key: "{{ lookup('file', repo_root ~ '/conjur/host_api_key') | trim }}"
+    conjur_cacert: "{{ lookup('file', repo_root ~ '/conjur/conjur-server.pem') }}"
+    target_port: "{{ lookup('env', 'TARGET_PORT') | default('2250', true) }}"
+    target_host: "{{ lookup('env', 'TARGET_HOST') | default('host.containers.internal', true) }}"
+    conjur_url: "{{ lookup('env', 'CONJUR_URL') | default('https://host.containers.internal:8443', true) }}"
+    project_scm_url: "{{ lookup('env', 'PROJECT_SCM_URL') }}"
+    project_scm_branch: "{{ lookup('env', 'PROJECT_SCM_BRANCH') | default('main', true) }}"
+    playbook_path: ansible/playbooks/ping.yml
+  tasks:
+    - name: Require PROJECT_SCM_URL
+      ansible.builtin.assert:
+        that:
+          - project_scm_url | length > 0
+        fail_msg: "PROJECT_SCM_URL is empty (set it or ensure git remote origin exists)"
+
+    # create_preload_data: false skips Default org; create it ourselves.
+    - name: Ensure organization
+      awx.awx.organization:
+        name: "{{ organization_name }}"
+        state: present
+
+    # Drop AWX sample objects if present from an older preload install.
+    - name: Remove AWX sample job template
+      awx.awx.job_template:
+        name: Demo Job Template
+        state: absent
+
+    - name: Remove AWX sample project
+      awx.awx.project:
+        name: Demo Project
+        state: absent
+        wait: false
+
+    - name: Remove AWX sample inventory
+      awx.awx.inventory:
+        name: Demo Inventory
+        organization: "{{ organization_name }}"
+        state: absent
+
+    # Preload Demo Credential is owned by admin (no org), not by Default.
+    - name: Remove AWX sample credential
+      awx.awx.credential:
+        name: Demo Credential
+        credential_type: Machine
+        state: absent
+
+    - name: Create Conjur lookup credential
+      awx.awx.credential:
+        name: "{{ conjur_cred_name }}"
+        description: Conjur OSS lookup for the Ansible control identity
+        organization: "{{ organization_name }}"
+        credential_type: CyberArk Conjur Secrets Manager Lookup
+        inputs:
+          url: "{{ conjur_url }}"
+          api_key: "{{ conjur_api_key }}"
+          account: "{{ conjur_account }}"
+          username: "{{ conjur_username }}"
+          cacert: "{{ conjur_cacert }}"
+        state: present
+
+    - name: Create Machine credential shell (secrets come from Conjur)
+      awx.awx.credential:
+        name: "{{ machine_cred_name }}"
+        description: SSH Machine credential; private key and user from Conjur
+        organization: "{{ organization_name }}"
+        credential_type: Machine
+        inputs:
+          username: demo
+        state: present
+
+    - name: Link Machine ssh_key_data to Conjur secret
+      awx.awx.credential_input_source:
+        target_credential: "{{ machine_cred_name }}"
+        source_credential: "{{ conjur_cred_name }}"
+        input_field_name: ssh_key_data
+        metadata:
+          secret_path: "{{ conjur_secret_ssh_key }}"
+        state: present
+
+    - name: Ensure demo inventory
+      awx.awx.inventory:
+        name: "{{ inventory_name }}"
+        organization: "{{ organization_name }}"
+        state: present
+
+    - name: Ensure target host in inventory
+      awx.awx.host:
+        name: target
+        inventory: "{{ inventory_name }}"
+        variables:
+          ansible_host: "{{ target_host }}"
+          ansible_port: "{{ target_port | int }}"
+          # Do NOT set IdentitiesOnly=yes: Controller injects the Conjur key via ssh-agent.
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        state: present
+
+    - name: Ensure Git project
+      awx.awx.project:
+        name: "{{ project_name }}"
+        description: Playbooks from Git (AAP SCM sync)
+        organization: "{{ organization_name }}"
+        scm_type: git
+        scm_url: "{{ project_scm_url }}"
+        scm_branch: "{{ project_scm_branch }}"
+        scm_update_on_launch: true
+        scm_clean: true
+        scm_delete_on_update: false
+        state: present
+        wait: true
+        update_project: true
+
+    - name: Ensure job template
+      awx.awx.job_template:
+        name: "{{ job_template_name }}"
+        job_type: run
+        inventory: "{{ inventory_name }}"
+        project: "{{ project_name }}"
+        playbook: "{{ playbook_path }}"
+        credentials:
+          - "{{ machine_cred_name }}"
+        ask_credential_on_launch: false
+        state: present
+
+    - name: Show summary
+      ansible.builtin.debug:
+        msg:
+          - "Conjur credential: {{ conjur_cred_name }}"
+          - "Machine credential: {{ machine_cred_name }} (ssh_key_data ← Conjur)"
+          - "Project SCM: {{ project_scm_url }} ({{ project_scm_branch }})"
+          - "Job template: {{ job_template_name }} → {{ playbook_path }}"
+          - "Launch with: make demo"

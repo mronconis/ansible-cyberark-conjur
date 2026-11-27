@@ -1,0 +1,8 @@
+---
+# Secrets come from the Controller Machine credential (Conjur plugin), not from this playbook.
+- name: Ping target using Conjur-backed Machine credential
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Connectivity check
+      ansible.builtin.ping:

@@ -1,0 +1,54 @@
+# CyberArk Conjur OSS — local demo stack (Podman Compose / Docker Compose)
+# NOT for production use.
+#
+# Generate TLS certs first: ./scripts/gen-tls.sh
+# (Do NOT use a transient openssl compose service — podman-compose hangs on it.)
+
+services:
+  database:
+    image: docker.io/library/postgres:15
+    container_name: postgres_database
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: password
+      POSTGRES_PASSWORD: SuperSecretPg
+    ports:
+      - "8432:5432"
+
+  conjur:
+    image: docker.io/cyberark/conjur
+    container_name: conjur_server
+    command: server
+    environment:
+      DATABASE_URL: postgres://postgres:SuperSecretPg@database/postgres
+      CONJUR_DATA_KEY:
+      CONJUR_AUTHENTICATORS:
+      CONJUR_TELEMETRY_ENABLED: "false"
+    depends_on:
+      - database
+    restart: on-failure
+    ports:
+      - "8080:80"
+
+  proxy:
+    image: docker.io/library/nginx:latest
+    container_name: nginx_proxy
+    ports:
+      - "8443:443"
+    volumes:
+      - ./conf/:/etc/nginx/conf.d/:ro,z
+      - ./conf/tls/:/etc/nginx/tls/:ro,z
+    depends_on:
+      - conjur
+    restart: on-failure
+
+  client:
+    image: docker.io/cyberark/conjur-cli:9
+    container_name: conjur_client
+    platform: linux/amd64
+    depends_on:
+      - proxy
+    entrypoint: sleep
+    command: infinity
+    volumes:
+      - ./conf/policy:/policy:z
+      - ../keys:/keys:z

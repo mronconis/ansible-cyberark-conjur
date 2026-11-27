@@ -1,0 +1,31 @@
+# Policy: Ansible control node retrieves the target SSH private key from Conjur.
+- !policy
+  id: ansible
+  body:
+    - !user operator
+
+    - !host control-node
+
+    - !variable
+      id: target/ssh_private_key
+      annotations:
+        description: SSH private key for the demo target VM
+
+    - !variable
+      id: target/ssh_user
+      annotations:
+        description: SSH username for the demo target VM
+
+    - !permit
+      role: !user operator
+      privileges: [read, update, execute]
+      resources:
+        - !variable target/ssh_private_key
+        - !variable target/ssh_user
+
+    - !permit
+      role: !host control-node
+      privileges: [read, execute]
+      resources:
+        - !variable target/ssh_private_key
+        - !variable target/ssh_user

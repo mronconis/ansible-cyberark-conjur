@@ -1,0 +1,23 @@
+# Target VM for the Ansible ↔ CyberArk Conjur demo (Apple Silicon + UTM).
+# Provider: vagrant_utm  |  Box: utm/ubuntu-24.04 (arm64)
+
+Vagrant.configure("2") do |config|
+  config.vm.define "target", primary: true do |machine|
+    machine.vm.box = "utm/ubuntu-24.04"
+    machine.vm.hostname = "target"
+
+    machine.vm.provider "utm" do |u|
+      u.name = "ansible-cyberark-target"
+      u.cpus = 2
+      u.memory = 2048
+      u.notes = "Ansible + CyberArk Conjur demo target"
+      u.directory_share_mode = "virtFS"
+    end
+
+    # Upload the demo public key into the vagrant user's home, then create user "demo".
+    machine.vm.provision "file",
+                         source: "../keys/id_ed25519.pub",
+                         destination: "id_ed25519.pub"
+    machine.vm.provision "shell", path: "provision/setup-ssh.sh", privileged: true
+  end
+end

@@ -1,0 +1,44 @@
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: awx
+  namespace: awx
+spec:
+  replicas: 1
+  web_replicas: 1
+  task_replicas: 1
+
+  service_type: NodePort
+  nodeport_port: 30080
+  ingress_type: none
+
+  admin_user: admin
+
+  # No AWX sample Demo Project / Inventory / JT — only what configure creates.
+  create_preload_data: false
+
+  # Projects come from Git SCM; no shared projects PVC required.
+  projects_persistence: false
+
+  web_resource_requirements:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  task_resource_requirements:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  ee_resource_requirements:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi

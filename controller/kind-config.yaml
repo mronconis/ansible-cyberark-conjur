@@ -1,0 +1,18 @@
+# kind cluster for local Automation Controller (AWX) on Apple Silicon + Podman.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: aap-cyberark-demo
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # AWX UI / API (service NodePort is patched after install)
+      - containerPort: 30080
+        hostPort: 8088
+        protocol: TCP
+    # Allow pods to reach Conjur and Vagrant port-forwards on the Mac host
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
